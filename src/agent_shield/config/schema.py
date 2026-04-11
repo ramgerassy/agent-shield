@@ -18,6 +18,18 @@ class AgentConfig(BaseModel):
     )
     response_path: str | None = None
 
+    # Optional user-supplied hooks (dotted import paths: "module.function").
+    # Per-test overrides on TestCase win over these defaults.
+    custom_request: str | None = None
+    custom_extract: str | None = None
+
+
+class RateLimitConfig(BaseModel):
+    """Token-bucket rate limit applied across all requests to the agent."""
+
+    requests: int = Field(..., ge=1, description="Tokens (requests) per period")
+    per: Literal["second", "minute"] = "minute"
+
 
 class SettingsConfig(BaseModel):
     threshold: int = 85
@@ -25,6 +37,7 @@ class SettingsConfig(BaseModel):
     concurrency: int = 3
     retries: int = 1
     output: str = "./agent-shield-report.json"
+    rate_limit: RateLimitConfig | None = None
 
 
 AssertionType = Literal[
@@ -74,6 +87,9 @@ class ConversationStep(BaseModel):
 class TestCase(BaseModel):
     """A test case — either single-turn (prompt + assert) or multi-turn (conversation)."""
 
+    # Tell pytest this is not a test class
+    __test__ = False
+
     model_config = ConfigDict(populate_by_name=True)
 
     name: str
@@ -86,6 +102,10 @@ class TestCase(BaseModel):
     # Multi-turn fields
     conversation: list[ConversationStep] | None = None
     on_step_fail: Literal["stop", "continue"] = "stop"
+
+    # Per-test hook overrides (dotted import paths)
+    custom_request: str | None = None
+    custom_extract: str | None = None
 
     @model_validator(mode="after")
     def check_test_shape(self) -> TestCase:
@@ -184,6 +204,9 @@ class RunResult(BaseModel):
 
 class TestResult(BaseModel):
     """Aggregated result for a test case across all repeat runs."""
+
+    # Tell pytest this is not a test class
+    __test__ = False
 
     name: str
     type: Literal["single-turn", "multi-turn"]
