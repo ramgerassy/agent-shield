@@ -8,34 +8,50 @@ from rich.console import Console
 from agent_shield.config.schema import RunReport, RunResult, StepResult, TestResult
 
 
-# Cached UTF-8 stream — created once per process. We must not let this be
-# garbage collected, because TextIOWrapper closes the underlying buffer on
-# destruction, which would break sys.stdout for any later code in the process
-# (including subsequent tests in a test session).
+# Cached UTF-8 wrapper — only created on platforms where the underlying
+# stdout encoding can't handle our Unicode glyphs. Cached at module level
+# because TextIOWrapper closes the underlying buffer on destruction, which
+# would corrupt sys.stdout for the rest of the process.
 _utf8_stream: io.TextIOWrapper | None = None
 
 
-def _make_console() -> Console:
-    """Build a Console that always writes UTF-8.
+def _stdout_supports_utf8() -> bool:
+    """True if the current sys.stdout can already encode our Unicode glyphs.
 
-    Some environments (Windows consoles with legacy codepages, minimal
-    Linux containers with LANG=C, etc.) report stdout's encoding as
-    something other than UTF-8 and crash on the Unicode glyphs we use
-    (✓ ✗ ⊘ × …). We wrap `sys.stdout.buffer` in a UTF-8 TextIOWrapper
-    with `errors='replace'` so unsupported terminals degrade to '?'
-    instead of raising UnicodeEncodeError.
+    This is the case on:
+    - macOS (default UTF-8 locale)
+    - Modern Linux distros (en_US.UTF-8 and friends)
+    - Modern Windows Terminal / PowerShell / VS Code terminal (UTF-8 codepage)
+    - pytest's `capsys` capture buffer (uses UTF-8 by default)
 
-    `TextIOWrapper.isatty()` delegates to the underlying buffer, so
-    Rich's TTY detection (and color decisions) still work correctly.
-    If `sys.stdout` is already a wrapper around `sys.stdout.buffer`
-    that we can't access (rare — e.g., captured stdout in some test
-    harnesses), fall back to the default Console.
-
-    The wrapper is cached at module level so it is never garbage
-    collected — TextIOWrapper closes the underlying buffer on
-    destruction, which would corrupt sys.stdout for the rest of the
-    process.
+    Returns False on:
+    - Legacy Windows consoles with non-UTF-8 codepages (cp1252, cp1255, cp932…)
+    - Minimal Linux containers with LANG=C / LANG=POSIX (encoding=ascii)
     """
+    encoding = getattr(sys.stdout, "encoding", None)
+    if not encoding:
+        return False
+    return encoding.lower().replace("-", "") in ("utf8",)
+
+
+def _make_console() -> Console:
+    """Build a Console that can write our Unicode glyphs (✓ ✗ ⊘ × …).
+
+    On platforms where stdout already supports UTF-8, returns a plain
+    Console — no wrapping. Test runners that capture stdout (like pytest's
+    `capsys`) hit this path and capture the output normally.
+
+    On platforms where stdout cannot encode our glyphs, wraps the
+    underlying binary buffer in a UTF-8 `TextIOWrapper` with
+    `errors='replace'` so unsupported chars degrade to '?' instead of
+    raising. The wrapper is cached at module level (TextIOWrapper closes
+    its underlying buffer on garbage collection, which would corrupt
+    sys.stdout for the rest of the process if we created a new one each
+    call).
+    """
+    if _stdout_supports_utf8():
+        return Console()
+
     global _utf8_stream
     if _utf8_stream is None:
         try:
