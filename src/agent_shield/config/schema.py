@@ -39,6 +39,13 @@ class SettingsConfig(BaseModel):
     output: str = "./agent-shield-report.json"
     rate_limit: RateLimitConfig | None = None
 
+    # Optional additional output formats. Each is opt-in via this path field
+    # (or its corresponding CLI flag). The JUnit XML report is auto-enabled
+    # in --ci mode if no path is set, defaulting to ./agent-shield-junit.xml.
+    junit_output: str | None = None
+    html_output: str | None = None
+    markdown_output: str | None = None
+
 
 AssertionType = Literal[
     "contains",
